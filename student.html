@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Student Dashboard — Library Management</title>
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- ======== SIDEBAR ======== -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Library Management</h1>
+      <p>Student Portal</p>
+    </div>
+
+    <a class="nav-item active" onclick="showSection('catalog')">
+      <span class="icon">📖</span> Browse Catalog
+    </a>
+    <a class="nav-item" onclick="showSection('myBooks')">
+      <span class="icon">📌</span> My Books
+    </a>
+    <a class="nav-item" onclick="showSection('history')">
+      <span class="icon">🕒</span> History
+    </a>
+
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <strong id="studentName">Loading...</strong>
+        Student
+      </div>
+      <button class="btn-logout" onclick="handleLogout()">Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- ======== MAIN CONTENT ======== -->
+  <main class="main-content">
+
+    <!-- ===== SECTION: CATALOG ===== -->
+    <div id="section-catalog">
+
+      <!-- Recommendation Panel -->
+      <div class="section" id="recSection" style="display:none">
+        <div class="section-header">
+          <span class="section-title">⭐ Recommended For You</span>
+          <span class="section-tag">Based on your borrow history</span>
+        </div>
+        <div class="section-body">
+          <div class="rec-grid" id="recGrid"></div>
+        </div>
+      </div>
+
+      <!-- Live Catalog -->
+      <div class="section">
+        <div class="section-header">
+          <span class="section-title">📚 Available Books</span>
+          <span class="section-tag" id="catalogCount">Real-time</span>
+        </div>
+        <div class="section-body">
+          <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+            <input type="text" id="catalogSearch" placeholder="Search title, author or genre..." oninput="filterCatalog()" style="flex:1;min-width:200px" />
+            <select id="genreFilter" onchange="filterCatalog()" style="width:160px">
+              <option value="">All Genres</option>
+              <option>Tech</option>
+              <option>Science</option>
+              <option>Mathematics</option>
+              <option>History</option>
+              <option>Literature</option>
+              <option>Sci-Fi</option>
+              <option>Mystery</option>
+              <option>Self-Help</option>
+              <option>Engineering</option>
+            </select>
+          </div>
+
+          <!-- Borrow Confirmation Banner -->
+          <div class="alert alert-success" id="borrowSuccess"></div>
+          <div class="alert alert-error"   id="borrowError"></div>
+
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Author</th>
+                  <th>Genre</th>
+                  <th>Borrow Period</th>
+                  <th>Due Date (if borrowed today)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="catalogBody">
+                <tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Loading books...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ===== SECTION: MY BOOKS (active borrows) ===== -->
+    <div id="section-myBooks" style="display:none">
+      <div class="page-header">
+        <h1 class="page-title">My Borrowed Books</h1>
+        <p class="page-subtitle">Books you currently have checked out</p>
+      </div>
+
+      <div class="alert alert-success" id="returnSuccess"></div>
+      <div class="alert alert-error"   id="returnError"></div>
+
+      <div class="section">
+        <div class="section-body">
+          <div id="myBooksContainer">
+            <p style="text-align:center;color:var(--text-muted);padding:32px">Loading your books...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ===== SECTION: HISTORY ===== -->
+    <div id="section-history" style="display:none">
+      <div class="page-header">
+        <h1 class="page-title">Borrow History</h1>
+        <p class="page-subtitle">Books you've returned in the past</p>
+      </div>
+      <div class="section">
+        <div class="section-body">
+          <div class="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Title</th>
+                  <th>Author</th>
+                  <th>Genre</th>
+                  <th>Duration</th>
+                  <th>Borrowed On</th>
+                  <th>Returned On</th>
+                </tr>
+              </thead>
+              <tbody id="historyBody">
+                <tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Loading history...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+
+<script type="module">
+  import { logout, getCurrentUser }                              from "./js/auth.js";
+  import { borrowBook, returnBook, streamAvailableBooks,
+           streamMyBorrows, getRecommendations, getBorrowHistory } from "./js/student.js";
+
+  let currentUser = null;
+  let allBooks    = [];
+
+  // ── On Load ─────────────────────────────────────────────
+  currentUser = await getCurrentUser();
+  if (currentUser) {
+    document.getElementById("studentName").textContent = currentUser.name || "Student";
+  }
+
+  // Load recommendations (only after history exists)
+  loadRecommendations();
+
+  // ── Recommendations ──────────────────────────────────────
+  async function loadRecommendations() {
+    const recs = await getRecommendations();
+    const section = document.getElementById("recSection");
+    const grid    = document.getElementById("recGrid");
+
+    if (recs.length === 0) { section.style.display = "none"; return; }
+
+    section.style.display = "";
+    grid.innerHTML = recs.map(book => {
+      const dueIfBorrowed = calcDueDate(book.borrowDuration);
+      return `
+        <div class="rec-card" onclick="handleBorrow(${JSON.stringify(book).replace(/"/g, '&quot;')})">
+          <div class="book-title">${book.title}</div>
+          <div class="book-author">${book.author}</div>
+          <div class="book-meta">
+            <span class="badge badge-${book.borrowDuration}">${book.borrowDuration}d</span>
+            <span style="font-size:11px;color:var(--text-muted)">Due: ${dueIfBorrowed}</span>
+          </div>
+        </div>`;
+    }).join("");
+  }
+
+  // ── Live Catalog Stream ───────────────────────────────────
+  streamAvailableBooks((books) => {
+    allBooks = books;
+    document.getElementById("catalogCount").textContent = `${books.length} available`;
+    renderCatalog(books);
+  });
+
+  window.filterCatalog = function() {
+    const term  = document.getElementById("catalogSearch").value.toLowerCase();
+    const genre = document.getElementById("genreFilter").value;
+    const filtered = allBooks.filter(b =>
+      (b.title?.toLowerCase().includes(term) ||
+       b.author?.toLowerCase().includes(term) ||
+       b.genre?.toLowerCase().includes(term)) &&
+      (!genre || b.genre === genre)
+    );
+    renderCatalog(filtered);
+  };
+
+  function renderCatalog(books) {
+    const tbody = document.getElementById("catalogBody");
+    if (books.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px">No books found.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = books.map(book => {
+      const dueIfBorrowed = calcDueDate(book.borrowDuration);
+      return `
+        <tr>
+          <td><strong>${book.title}</strong></td>
+          <td style="color:var(--text-muted)">${book.author}</td>
+          <td>${book.genre}</td>
+          <td><span class="badge badge-${book.borrowDuration}">${book.borrowDuration} days</span></td>
+          <td style="color:var(--text-muted);font-family:var(--font-mono);font-size:12px">${dueIfBorrowed}</td>
+          <td>
+            <button class="btn btn-success btn-sm"
+              onclick='handleBorrow(${JSON.stringify(book)})'>
+              📖 Borrow
+            </button>
+          </td>
+        </tr>`;
+    }).join("");
+  }
+
+  // ── Borrow Action ────────────────────────────────────────
+  window.handleBorrow = async function(book) {
+    const confirmed = confirm(
+      `Borrow "${book.title}"?\n\n` +
+      `Duration: ${book.borrowDuration} days\n` +
+      `Due date: ${calcDueDate(book.borrowDuration)}`
+    );
+    if (!confirmed) return;
+
+    const result = await borrowBook(book);
+    const successEl = document.getElementById("borrowSuccess");
+    const errorEl   = document.getElementById("borrowError");
+
+    if (result.success) {
+      successEl.textContent = `✓ "${book.title}" borrowed! Due: ${result.dueDate.toLocaleDateString("en-GB", { day:"2-digit", month:"long", year:"numeric" })}`;
+      successEl.classList.add("show");
+      errorEl.classList.remove("show");
+      setTimeout(() => successEl.classList.remove("show"), 5000);
+      loadRecommendations(); // refresh recs after borrow
+    } else {
+      errorEl.textContent = result.error;
+      errorEl.classList.add("show");
+      setTimeout(() => errorEl.classList.remove("show"), 5000);
+    }
+  };
+
+  // ── My Books (active borrows) with Return button ─────────
+  streamMyBorrows((borrows) => {
+    const container = document.getElementById("myBooksContainer");
+
+    if (borrows.length === 0) {
+      container.innerHTML = `
+        <div style="text-align:center;padding:48px;color:var(--text-muted)">
+          <div style="font-size:48px;margin-bottom:16px">📭</div>
+          <p>You have no books currently borrowed.</p>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="showSection('catalog')">Browse Catalog</button>
+        </div>`;
+      return;
+    }
+
+    container.innerHTML = borrows.map(b => {
+      const borrowDateStr = b.borrowDate?.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) || "—";
+      const dueDateStr    = b.dueDate?.toLocaleDateString("en-GB",    { day:"2-digit", month:"short", year:"numeric" }) || "—";
+
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid var(--border);gap:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:200px">
+            <strong style="font-size:15px">${b.bookTitle}</strong>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${b.bookAuthor || ""}</div>
+          </div>
+          <div style="text-align:center;min-width:100px">
+            <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px">Borrowed</div>
+            <div style="font-size:13px;margin-top:2px">${borrowDateStr}</div>
+          </div>
+          <div style="text-align:center;min-width:80px">
+            <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px">Duration</div>
+            <span class="badge badge-${b.durationDays}" style="margin-top:4px;display:inline-block">${b.durationDays}d</span>
+          </div>
+          <div style="text-align:center;min-width:100px">
+            <div style="font-size:10px;color:var(--text-muted);font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px">Due Date</div>
+            <div style="font-size:13px;margin-top:2px">${dueDateStr}</div>
+          </div>
+          <div style="min-width:120px;text-align:center">
+            <div class="${b.colorClass}" style="font-size:12px;font-weight:600;margin-bottom:6px">${b.label}</div>
+            <button class="btn btn-outline btn-sm" onclick="handleReturn('${b.bookId}', '${b.transactionId}', '${b.bookTitle}')">
+              ↩ Return
+            </button>
+          </div>
+        </div>`;
+    }).join("");
+  });
+
+  // ── Return Action ────────────────────────────────────────
+  window.handleReturn = async function(bookId, txnId, title) {
+    if (!confirm(`Return "${title}"? This cannot be undone.`)) return;
+
+    const result    = await returnBook(bookId, txnId);
+    const successEl = document.getElementById("returnSuccess");
+    const errorEl   = document.getElementById("returnError");
+
+    if (result.success) {
+      successEl.textContent = `✓ "${title}" returned successfully on ${result.returnDate.toLocaleDateString("en-GB")}.`;
+      successEl.classList.add("show");
+      errorEl.classList.remove("show");
+      setTimeout(() => successEl.classList.remove("show"), 5000);
+    } else {
+      errorEl.textContent = result.error;
+      errorEl.classList.add("show");
+    }
+  };
+
+  // ── Borrow History ───────────────────────────────────────
+  async function loadHistory() {
+    const history = await getBorrowHistory();
+    const tbody   = document.getElementById("historyBody");
+    if (history.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px">No borrow history yet.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = history.map(h => `
+      <tr>
+        <td><strong>${h.bookTitle}</strong></td>
+        <td style="color:var(--text-muted)">${h.bookAuthor}</td>
+        <td>${h.bookGenre}</td>
+        <td><span class="badge badge-${h.durationDays}">${h.durationDays} days</span></td>
+        <td style="font-family:var(--font-mono);font-size:12px">${h.borrowDate?.toLocaleDateString("en-GB") || "—"}</td>
+        <td style="font-family:var(--font-mono);font-size:12px">${h.returnDate?.toLocaleDateString("en-GB") || "—"}</td>
+      </tr>
+    `).join("");
+  }
+
+  // ── Section Navigation ───────────────────────────────────
+  window.showSection = function(name) {
+    ["catalog","myBooks","history"].forEach(s => {
+      document.getElementById(`section-${s}`).style.display = s === name ? "" : "none";
+    });
+    document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+    event.target.closest(".nav-item").classList.add("active");
+    if (name === "history") loadHistory();
+  };
+
+  // ── Helpers ──────────────────────────────────────────────
+  function calcDueDate(days) {
+    const d = new Date();
+    d.setDate(d.getDate() + days);
+    return d.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" });
+  }
+
+  window.handleLogout = function() { logout(); };
+</script>
+
+</body>
+</html>

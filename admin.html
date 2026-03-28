@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin Dashboard — Library Management</title>
+  <link rel="stylesheet" href="css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+<div class="page-wrapper">
+
+  <!-- ======== SIDEBAR ======== -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h1>Library Management</h1>
+      <p>Admin Panel</p>
+    </div>
+
+    <a class="nav-item active" onclick="showSection('inventory')">
+      <span class="icon">📚</span> Inventory
+    </a>
+    <a class="nav-item" onclick="showSection('addBook')">
+      <span class="icon">➕</span> Add Book
+    </a>
+    <a class="nav-item" onclick="showSection('borrowers')">
+      <span class="icon">👥</span> Borrower Tracking
+    </a>
+
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <strong id="adminName">Loading...</strong>
+        Administrator
+      </div>
+      <button class="btn-logout" onclick="handleLogout()">Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- ======== MAIN CONTENT ======== -->
+  <main class="main-content">
+
+    <!-- Stat Cards (always visible) -->
+    <div class="stats-row" id="statsRow">
+      <div class="stat-card">
+        <div class="label">Total Books</div>
+        <div class="value" id="statTotal">—</div>
+      </div>
+      <div class="stat-card success">
+        <div class="label">Available</div>
+        <div class="value" id="statAvailable">—</div>
+      </div>
+      <div class="stat-card danger">
+        <div class="label">Overdue</div>
+        <div class="value" id="statOverdue">—</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="label">Due Soon</div>
+        <div class="value" id="statDueSoon">—</div>
+      </div>
+      
+      
+    </div>
+    <div style="background: #1a1d27; padding: 20px; border-radius: 6px; border: 1px solid #2e3347; margin-bottom: 20px; display: flex; align-items: center; justify-content: center; height: 300px;">
+      <div style="width: 300px; height: 100%;">
+      <canvas id="genreChart"></canvas>
+      </div>
+    </div>
+
+
+    <!-- ===== SECTION: INVENTORY ===== -->
+    <div id="section-inventory" class="section">
+      <div class="section-header">
+        <span class="section-title">📚 Book Inventory</span>
+        <span class="section-tag">Real-time • All Books</span>
+      </div>
+      <div class="section-body">
+        <div style="margin-bottom:16px">
+          <input type="text" id="inventorySearch" placeholder="Search by title, author or genre..." oninput="filterInventory()" style="max-width:360px" />
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Author</th>
+                <th>Genre</th>
+                <th>Duration</th>
+                <th>Status</th>
+                <th>Borrower</th>
+                <th>Due Date</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="inventoryBody">
+              <tr><td colspan="8" style="text-align:center;color:var(--text-muted)">Loading inventory...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ===== SECTION: ADD BOOK ===== -->
+    <div id="section-addBook" class="section" style="display:none">
+      <div class="section-header">
+        <span class="section-title">➕ Add New Book</span>
+        <span class="section-tag">Catalog Management</span>
+      </div>
+      <div class="section-body">
+        <div class="alert alert-success" id="addSuccess">✓ Book added successfully!</div>
+        <div class="alert alert-error"   id="addError"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Title *</label>
+            <input type="text" id="bookTitle" placeholder="e.g. Clean Code" />
+          </div>
+          <div class="form-group">
+            <label>Author *</label>
+            <input type="text" id="bookAuthor" placeholder="e.g. Robert C. Martin" />
+          </div>
+          <div class="form-group">
+            <label>Genre *</label>
+            <select id="bookGenre">
+              <option value="">— Select Genre —</option>
+              <option>Tech</option>
+              <option>Science</option>
+              <option>Mathematics</option>
+              <option>History</option>
+              <option>Literature</option>
+              <option>Sci-Fi</option>
+              <option>Mystery</option>
+              <option>Self-Help</option>
+              <option>Engineering</option>
+              <option>Other</option>
+            </select>
+          </div>
+
+          <!-- ★ KEY FEATURE: Admin sets borrow duration per book -->
+          <div class="form-group">
+            <label>Borrow Duration *</label>
+            <div class="duration-options">
+              <div class="duration-opt" onclick="selectDuration(7)"  id="dur-7">
+                <span class="days">7</span>
+                <span class="label">days</span>
+              </div>
+              <div class="duration-opt selected" onclick="selectDuration(14)" id="dur-14">
+                <span class="days">14</span>
+                <span class="label">days</span>
+              </div>
+              <div class="duration-opt" onclick="selectDuration(28)" id="dur-28">
+                <span class="days">28</span>
+                <span class="label">days</span>
+              </div>
+            </div>
+            <input type="hidden" id="bookDuration" value="14" />
+          </div>
+
+          <div class="form-group full">
+            <label>Description</label>
+            <textarea id="bookDescription" placeholder="Brief description of the book..."></textarea>
+          </div>
+        </div>
+
+        <div style="margin-top:20px;display:flex;gap:10px">
+          <button class="btn btn-primary" onclick="handleAddBook()">➕ Add Book to Catalog</button>
+          <button class="btn btn-outline" onclick="clearAddForm()">Clear Form</button>
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ===== SECTION: BORROWER TRACKING ===== -->
+    <div id="section-borrowers" class="section" style="display:none">
+      <div class="section-header">
+        <span class="section-title">👥 Active Borrowers</span>
+        <span class="section-tag">Real-time • Currently Borrowed</span>
+      </div>
+      <div class="section-body">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Book Title</th>
+                <th>Borrow Date</th>
+                <th>Duration</th>
+                <th>Due Date</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="borrowersBody">
+              <tr><td colspan="6" style="text-align:center;color:var(--text-muted)">Loading borrowers...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+
+<script type="module">
+  import { logout, getCurrentUser }                          from "./js/auth.js";
+  import { addBook, streamInventory, streamActiveBorrows,
+           getOverdueStats, deleteBook, updateBookDuration,renderAnalyticsChart } from "./js/admin.js";
+
+  // ── On load ─────────────────────────────────────────────
+  getCurrentUser().then(user => {
+    if (user) document.getElementById("adminName").textContent = user.name || "Admin";
+  });
+
+  // Load stats
+  async function refreshStats() {
+    const stats = await getOverdueStats();
+    document.getElementById("statOverdue").textContent  = stats.overdue;
+    document.getElementById("statDueSoon").textContent  = stats.dueSoon;
+  }
+
+  // ── Real-time Inventory Stream ───────────────────────────
+  let allBooks = [];
+  streamInventory((books) => {
+    allBooks = books;
+    renderInventory(books);
+    // Update stat cards
+    document.getElementById("statTotal").textContent     = books.length;
+    document.getElementById("statAvailable").textContent = books.filter(b => b.status === "Available").length;
+    refreshStats();
+  });
+
+  window.filterInventory = function() {
+    const term = document.getElementById("inventorySearch").value.toLowerCase();
+    const filtered = allBooks.filter(b =>
+      b.title?.toLowerCase().includes(term) ||
+      b.author?.toLowerCase().includes(term) ||
+      b.genre?.toLowerCase().includes(term)
+    );
+    renderInventory(filtered);
+  };
+
+  function renderInventory(books) {
+    const tbody = document.getElementById("inventoryBody");
+    if (books.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--text-muted);padding:32px">No books found.</td></tr>`;
+      return;
+    }
+
+    tbody.innerHTML = books.map(book => {
+      const due     = book.dueDate ? book.dueDate.toDate() : null;
+      const dueStr  = due ? due.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) : "—";
+      const dueCls  = due ? getDueClass(due) : "";
+
+      return `
+        <tr>
+          <td><strong>${book.title}</strong></td>
+          <td style="color:var(--text-muted)">${book.author}</td>
+          <td>${book.genre}</td>
+          <td>
+            <select class="dur-select" style="padding:4px 8px;font-size:12px;width:auto"
+              onchange="handleDurationChange('${book.id}', this.value, '${book.status}')"
+              ${book.status === "Borrowed" ? "disabled title='Return book before changing duration'" : ""}>
+              <option value="7"  ${book.borrowDuration===7  ? "selected" : ""}>7 days</option>
+              <option value="14" ${book.borrowDuration===14 ? "selected" : ""}>14 days</option>
+              <option value="28" ${book.borrowDuration===28 ? "selected" : ""}>28 days</option>
+            </select>
+          </td>
+          <td><span class="badge badge-${book.status.toLowerCase()}">${book.status}</span></td>
+          <td style="color:var(--text-muted)">${book.borrowerName || "—"}</td>
+          <td class="${dueCls}">${dueStr}</td>
+          <td>
+            <button class="btn btn-danger btn-sm"
+              onclick="handleDelete('${book.id}', '${book.status}')"
+              ${book.status === "Borrowed" ? "disabled title='Cannot delete borrowed book'" : ""}>
+              🗑
+            </button>
+          </td>
+        </tr>`;
+    }).join("");
+  }
+
+  function getDueClass(dueDate) {
+    const days = Math.ceil((new Date(dueDate) - new Date()) / 86400000);
+    if (days < 0)  return "status-overdue";
+    if (days <= 3) return "status-warning";
+    return "status-ok";
+  }
+
+  // ── Real-time Borrower Tracking ──────────────────────────
+  streamActiveBorrows((borrows) => {
+    const tbody = document.getElementById("borrowersBody");
+    if (borrows.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-muted);padding:32px">No books currently borrowed.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = borrows.map(b => `
+      <tr>
+        <td><strong>${b.studentName}</strong></td>
+        <td>${b.bookTitle}</td>
+        <td style="color:var(--text-muted)">${b.borrowDate ? b.borrowDate.toLocaleDateString("en-GB") : "—"}</td>
+        <td><span class="badge badge-${b.durationDays}">${b.durationDays} days</span></td>
+        <td>${b.dueDate ? b.dueDate.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) : "—"}</td>
+        <td class="${b.colorClass}">${b.label}</td>
+      </tr>
+    `).join("");
+  });
+
+  // ── Add Book ─────────────────────────────────────────────
+  window.selectDuration = function(days) {
+    document.querySelectorAll(".duration-opt").forEach(el => el.classList.remove("selected"));
+    document.getElementById(`dur-${days}`).classList.add("selected");
+    document.getElementById("bookDuration").value = days;
+  };
+
+  window.handleAddBook = async function() {
+    const result = await addBook({
+      title:          document.getElementById("bookTitle").value,
+      author:         document.getElementById("bookAuthor").value,
+      genre:          document.getElementById("bookGenre").value,
+      description:    document.getElementById("bookDescription").value,
+      borrowDuration: document.getElementById("bookDuration").value
+    });
+
+    if (result.success) {
+      document.getElementById("addSuccess").classList.add("show");
+      document.getElementById("addError").classList.remove("show");
+      clearAddForm();
+      setTimeout(() => document.getElementById("addSuccess").classList.remove("show"), 3000);
+    } else {
+      document.getElementById("addError").textContent = result.error;
+      document.getElementById("addError").classList.add("show");
+    }
+  };
+
+  window.clearAddForm = function() {
+    ["bookTitle","bookAuthor","bookDescription"].forEach(id => document.getElementById(id).value = "");
+    document.getElementById("bookGenre").value = "";
+    window.selectDuration(14); // reset to default
+  };
+
+  // ── Edit Duration from Inventory ─────────────────────────
+  window.handleDurationChange = async function(bookId, newDuration, status) {
+    if (status === "Borrowed") return;
+    const result = await updateBookDuration(bookId, Number(newDuration));
+    if (!result.success) alert("Failed to update duration: " + result.error);
+  };
+
+  // ── Delete Book ──────────────────────────────────────────
+  window.handleDelete = async function(bookId, status) {
+    if (!confirm("Are you sure you want to remove this book from the catalog?")) return;
+    const result = await deleteBook(bookId, status);
+    if (!result.success) alert(result.error);
+  };
+
+  // ── Section Navigation ───────────────────────────────────
+  window.showSection = function(name) {
+    ["inventory","addBook","borrowers"].forEach(s => {
+      document.getElementById(`section-${s}`).style.display = s === name ? "" : "none";
+    });
+    document.querySelectorAll(".nav-item").forEach(el => el.classList.remove("active"));
+    event.target.closest(".nav-item").classList.add("active");
+  };
+
+  // ── Logout ───────────────────────────────────────────────
+  window.handleLogout = function() { logout(); };
+</script>
+
+</body>
+</html>
