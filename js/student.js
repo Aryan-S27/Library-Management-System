@@ -25,10 +25,158 @@ import {
 guardPage("student");
 
 let currentUser = null;
+// Pagination & Search State
+let allAvailableBooks = [];
+let filteredBooks = [];
+let currentPage = 1;
+const BOOKS_PER_PAGE = 100;
 
 // Load current user on module init
 (async () => { currentUser = await getCurrentUser(); })();
 
+// ==========================================
+// 📚 CATALOG & MODAL LOGIC
+// ==========================================
+
+// ==========================================
+// 📚 CATALOG, PAGINATION & SEARCH LOGIC
+// ==========================================
+
+async function loadCatalog() {
+  const catalogGrid = document.getElementById("studentCatalog");
+  if (!catalogGrid) return; 
+
+  catalogGrid.style = "display: flex; flex-direction: column; gap: 15px;";
+  catalogGrid.innerHTML = "<p style='color: var(--text-muted);'>Loading physical inventory...</p>";
+
+  // Fetch all available books ONCE
+  const q = query(collection(db, "books"), where("status", "==", "Available"));
+  const snapshot = await getDocs(q);
+
+  allAvailableBooks = [];
+  snapshot.forEach(docSnap => {
+    allAvailableBooks.push({ id: docSnap.id, ...docSnap.data() });
+  });
+
+  if (allAvailableBooks.length === 0) {
+    catalogGrid.innerHTML = "<p style='color: var(--text-muted);'>All books are currently checked out!</p>";
+    return;
+  }
+
+  // Initialize filtered array and render the first page
+  filteredBooks = [...allAvailableBooks];
+  renderCatalogPage(1);
+  setupSearchListener();
+}
+
+function renderCatalogPage(page) {
+  currentPage = page;
+  const catalogGrid = document.getElementById("studentCatalog");
+  catalogGrid.innerHTML = "";
+
+  // Math for 100 items per page
+  const startIndex = (page - 1) * BOOKS_PER_PAGE;
+  const endIndex = startIndex + BOOKS_PER_PAGE;
+  const booksToRender = filteredBooks.slice(startIndex, endIndex);
+
+  if (booksToRender.length === 0) {
+    catalogGrid.innerHTML = "<p style='color: var(--text-muted);'>No books found matching your search.</p>";
+  }
+
+  booksToRender.forEach(book => {
+    const card = document.createElement("div");
+    card.style = "background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 8px; padding: 15px; cursor: pointer; transition: transform 0.2s; display: flex; flex-direction: row; gap: 20px; align-items: center;";
+    card.onmouseover = () => card.style.transform = "translateX(5px)";
+    card.onmouseout = () => card.style.transform = "translateX(0)";
+    
+    const coverHTML = book.coverUrl 
+      ? `<img src="${book.coverUrl}" alt="Cover" style="height: 120px; width: 80px; object-fit: cover; border-radius: 4px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); flex-shrink: 0;">`
+      : `<div style="height: 120px; width: 80px; background: linear-gradient(135deg, var(--secondary-color), var(--bg-dark)); border-radius: 4px; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 10px; text-align: center; flex-shrink: 0;">No Cover</div>`;
+
+    card.innerHTML = `
+      ${coverHTML}
+      <div style="flex: 1; display: flex; flex-direction: column; justify-content: center;">
+        <h3 style="margin: 0 0 5px 0; color: var(--text-light); font-size: 18px;">${book.title}</h3>
+        <p style="margin: 0 0 10px 0; color: var(--text-muted); font-size: 14px;">${book.author}</p>
+        <div>
+          <span style="background: var(--secondary-color); padding: 4px 8px; border-radius: 4px; font-size: 12px; color: white;">${book.genre}</span>
+        </div>
+      </div>
+    `;
+
+    card.onclick = () => window.openModal(book);
+    catalogGrid.appendChild(card);
+  });
+
+  updatePaginationControls();
+}
+
+function updatePaginationControls() {
+  const prevBtn = document.getElementById("prevPageBtn");
+  const nextBtn = document.getElementById("nextPageBtn");
+  const indicator = document.getElementById("pageIndicator");
+
+  const totalPages = Math.ceil(filteredBooks.length / BOOKS_PER_PAGE) || 1;
+  indicator.innerText = `Page ${currentPage} of ${totalPages}`;
+
+  // Hide/Show buttons based on current page
+  prevBtn.style.display = currentPage > 1 ? "block" : "none";
+  nextBtn.style.display = currentPage < totalPages ? "block" : "none";
+}
+
+// Global functions for the HTML buttons to call
+window.nextPage = function() { renderCatalogPage(currentPage + 1); window.scrollTo(0, 0); };
+window.prevPage = function() { renderCatalogPage(currentPage - 1); window.scrollTo(0, 0); };
+
+// Search Filter Logic
+function setupSearchListener() {
+  const searchInput = document.getElementById("studentSearch");
+  if (!searchInput) return;
+
+  searchInput.addEventListener("input", (e) => {
+    const term = e.target.value.toLowerCase().trim();
+    
+    filteredBooks = allAvailableBooks.filter(book => {
+      const titleMatch = book.title.toLowerCase().includes(term);
+      const authorMatch = book.author.toLowerCase().includes(term);
+      const genreMatch = book.genre.toLowerCase().includes(term);
+      return titleMatch || authorMatch || genreMatch;
+    });
+
+    // Reset to page 1 whenever they type a new search
+    renderCatalogPage(1);
+  });
+}
+
+window.openModal = function(book) {
+  selectedBook = book;
+  document.getElementById("modalTitle").textContent = book.title;
+  document.getElementById("modalAuthor").textContent = book.author;
+  document.getElementById("modalGenre").textContent = book.genre;
+  document.getElementById("modalDescription").textContent = book.description || "No description available.";
+  
+  // Handle the Cover Image
+  const coverContainer = document.getElementById("modalCover");
+  if (book.coverUrl) {
+    coverContainer.innerHTML = `<img src="${book.coverUrl}" style="width: 100%; height: 100%; object-fit: cover;">`;
+  } else {
+    coverContainer.innerHTML = `<div style="width: 100%; height: 100%; background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)); display: flex; align-items: center; justify-content: center; color: white; text-align: center; font-size: 12px; padding: 10px;">${book.title}</div>`;
+  }
+
+  // Reset the dropdown to default (14 days) every time they open a new book
+  document.getElementById("borrowDuration").value = "14";
+
+  document.getElementById("bookModal").style.display = "flex";
+};
+
+window.closeModal = function() {
+  document.getElementById("bookModal").style.display = "none";
+  selectedBook = null;
+  document.getElementById("chatHistory").innerHTML = `
+    <div style="color: var(--text-muted); font-size: 13px; text-align: center; margin-top: auto; margin-bottom: auto;">
+      Ask me to summarize chapters, explain concepts, or quiz you on this book!
+    </div>`;
+};
 
 // ============================================================
 // SECTION 1 — BORROW A BOOK
@@ -300,3 +448,4 @@ async function getActiveBorrowCount(studentId) {
   const snap = await getDocs(q);
   return snap.size;
 }
+

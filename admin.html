@@ -6,6 +6,9 @@
   <title>Admin Dashboard — Library Management</title>
   <link rel="stylesheet" href="css/style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+</head>
 </head>
 <body>
 
@@ -85,7 +88,6 @@
                 <th>Title</th>
                 <th>Author</th>
                 <th>Genre</th>
-                <th>Duration</th>
                 <th>Status</th>
                 <th>Borrower</th>
                 <th>Due Date</th>
@@ -137,36 +139,36 @@
             </select>
           </div>
 
-          <!-- ★ KEY FEATURE: Admin sets borrow duration per book -->
-          <div class="form-group">
-            <label>Borrow Duration *</label>
-            <div class="duration-options">
-              <div class="duration-opt" onclick="selectDuration(7)"  id="dur-7">
-                <span class="days">7</span>
-                <span class="label">days</span>
-              </div>
-              <div class="duration-opt selected" onclick="selectDuration(14)" id="dur-14">
-                <span class="days">14</span>
-                <span class="label">days</span>
-              </div>
-              <div class="duration-opt" onclick="selectDuration(28)" id="dur-28">
-                <span class="days">28</span>
-                <span class="label">days</span>
-              </div>
-            </div>
-            <input type="hidden" id="bookDuration" value="14" />
-          </div>
-
           <div class="form-group full">
-            <label>Description</label>
-            <textarea id="bookDescription" placeholder="Brief description of the book..."></textarea>
+            <label style="display: flex; justify-content: space-between; align-items: center;">
+              Description
+              <button type="button" class="btn btn-sm" style="background: #8D3DAF; color: white; border: none; cursor: pointer; padding: 4px 8px; border-radius: 4px; font-weight: bold;" onclick="generateSummary()">
+                ✨ Auto-Generate
+              </button>
+            </label>
+            <textarea id="bookDescription" placeholder="Brief description of the book..." rows="4"></textarea>
           </div>
-        </div>
 
         <div style="margin-top:20px;display:flex;gap:10px">
           <button class="btn btn-primary" onclick="handleAddBook()">➕ Add Book to Catalog</button>
           <button class="btn btn-outline" onclick="clearAddForm()">Clear Form</button>
+          
+          <hr style="border: 0; border-top: 1px solid #2e3347; margin: 30px 0;">
+        
+        <div style="background: #0f111a; padding: 20px; border-radius: 8px; border: 1px dashed #8D3DAF;">
+          <h3 style="margin-top: 0; color: white;">🚀 Bulk Import (CSV)</h3>
+          <p style="color: #a0a6b1; font-size: 13px; margin-bottom: 15px;">Upload a dataset to instantly populate the library catalog.</p>
+          
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="file" id="csvUpload" accept=".csv" style="color: white;" />
+            <button class="btn btn-sm" style="background: #8D3DAF; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: bold;" onclick="importCSV()">
+              Run Ingestion
+            </button>
+          </div>
+          <p id="csvStatus" style="color: #4E9F3D; font-size: 13px; margin-top: 10px; font-weight: bold;"></p>
         </div>
+        </div>
+        
       </div>
     </div>
 
@@ -205,12 +207,13 @@
 <script type="module">
   import { logout, getCurrentUser }                          from "./js/auth.js";
   import { addBook, streamInventory, streamActiveBorrows,
-           getOverdueStats, deleteBook, updateBookDuration,renderAnalyticsChart } from "./js/admin.js";
+           getOverdueStats, deleteBook, renderAnalyticsChart,calculateMetrics } from "./js/admin.js";
 
   // ── On load ─────────────────────────────────────────────
   getCurrentUser().then(user => {
     if (user) document.getElementById("adminName").textContent = user.name || "Admin";
   });
+  calculateMetrics();
 
   // Load stats
   async function refreshStats() {
@@ -252,29 +255,44 @@
       const dueStr  = due ? due.toLocaleDateString("en-GB", { day:"2-digit", month:"short", year:"numeric" }) : "—";
       const dueCls  = due ? getDueClass(due) : "";
 
+      const isOverdue = dueCls === "status-overdue";
+      const isBorrowed = book.status === "Borrowed";
+
+      // THE TWO-STATE BUTTON LOGIC
+      let pingButton = ``;
+      if (isBorrowed) {
+        if (isOverdue) {
+          // It's borrowed AND overdue -> Show Red Alert Button
+          pingButton = `<button class="btn btn-sm" style="background-color: #ff4c4c; color: white; border: none; cursor: pointer; padding: 4px 8px; border-radius: 4px;"
+            onclick="pingBorrower('student@library.edu', '${book.borrowerName}', '${book.title}', '${dueStr}', true)"
+            title="Send Overdue Warning">
+            🚨 Ping
+          </button>`;
+        } else {
+          // It's borrowed but ON TIME -> Show Gray General Button
+          pingButton = `<button class="btn btn-sm" style="background-color: #4a5568; color: white; border: none; cursor: pointer; padding: 4px 8px; border-radius: 4px;"
+            onclick="pingBorrower('student@library.edu', '${book.borrowerName}', '${book.title}', '${dueStr}', false)"
+            title="Send General Message">
+            ✉️ Ping
+          </button>`;
+        }
+      }
+
       return `
         <tr>
           <td><strong>${book.title}</strong></td>
           <td style="color:var(--text-muted)">${book.author}</td>
           <td>${book.genre}</td>
-          <td>
-            <select class="dur-select" style="padding:4px 8px;font-size:12px;width:auto"
-              onchange="handleDurationChange('${book.id}', this.value, '${book.status}')"
-              ${book.status === "Borrowed" ? "disabled title='Return book before changing duration'" : ""}>
-              <option value="7"  ${book.borrowDuration===7  ? "selected" : ""}>7 days</option>
-              <option value="14" ${book.borrowDuration===14 ? "selected" : ""}>14 days</option>
-              <option value="28" ${book.borrowDuration===28 ? "selected" : ""}>28 days</option>
-            </select>
-          </td>
           <td><span class="badge badge-${book.status.toLowerCase()}">${book.status}</span></td>
           <td style="color:var(--text-muted)">${book.borrowerName || "—"}</td>
           <td class="${dueCls}">${dueStr}</td>
-          <td>
+          <td style= margin-right: 8px; gap: 8px;">
             <button class="btn btn-danger btn-sm"
               onclick="handleDelete('${book.id}', '${book.status}')"
               ${book.status === "Borrowed" ? "disabled title='Cannot delete borrowed book'" : ""}>
               🗑
             </button>
+            ${pingButton}
           </td>
         </tr>`;
     }).join("");
@@ -307,11 +325,7 @@
   });
 
   // ── Add Book ─────────────────────────────────────────────
-  window.selectDuration = function(days) {
-    document.querySelectorAll(".duration-opt").forEach(el => el.classList.remove("selected"));
-    document.getElementById(`dur-${days}`).classList.add("selected");
-    document.getElementById("bookDuration").value = days;
-  };
+
 
   window.handleAddBook = async function() {
     const result = await addBook({
@@ -319,7 +333,6 @@
       author:         document.getElementById("bookAuthor").value,
       genre:          document.getElementById("bookGenre").value,
       description:    document.getElementById("bookDescription").value,
-      borrowDuration: document.getElementById("bookDuration").value
     });
 
     if (result.success) {
@@ -336,7 +349,6 @@
   window.clearAddForm = function() {
     ["bookTitle","bookAuthor","bookDescription"].forEach(id => document.getElementById(id).value = "");
     document.getElementById("bookGenre").value = "";
-    window.selectDuration(14); // reset to default
   };
 
   // ── Edit Duration from Inventory ─────────────────────────
@@ -345,14 +357,6 @@
     const result = await updateBookDuration(bookId, Number(newDuration));
     if (!result.success) alert("Failed to update duration: " + result.error);
   };
-
-  // ── Delete Book ──────────────────────────────────────────
-  window.handleDelete = async function(bookId, status) {
-    if (!confirm("Are you sure you want to remove this book from the catalog?")) return;
-    const result = await deleteBook(bookId, status);
-    if (!result.success) alert(result.error);
-  };
-
   // ── Section Navigation ───────────────────────────────────
   window.showSection = function(name) {
     ["inventory","addBook","borrowers"].forEach(s => {

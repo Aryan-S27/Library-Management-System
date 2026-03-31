@@ -33,7 +33,7 @@ guardPage("admin");
 export async function addBook(formData) {
   // formData = { title, author, genre, description, borrowDuration }
 
-  if (!formData.title || !formData.author || !formData.genre || !formData.borrowDuration) {
+  if (!formData.title || !formData.author || !formData.genre ) {
     return { success: false, error: "Please fill in all required fields." };
   }
 
@@ -43,9 +43,8 @@ export async function addBook(formData) {
       author:         formData.author.trim(),
       genre:          formData.genre.trim(),
       description:    formData.description?.trim() || "",
+      coverUrl:       formData.coverUrl || "",
 
-      // ← KEY FEATURE: Admin-defined borrow duration stored with each book
-      borrowDuration: Number(formData.borrowDuration), // days: 7, 14, or 28
 
       status:         "Available",
       borrowedBy:     null,       // studentId when borrowed
@@ -62,23 +61,6 @@ export async function addBook(formData) {
   }
 }
 
-
-// ============================================================
-// SECTION 2 — UPDATE BOOK DURATION
-// Admin can change borrow duration on an existing book
-// Only allowed if book is currently Available
-// ============================================================
-
-export async function updateBookDuration(bookId, newDuration) {
-  try {
-    await updateDoc(doc(db, "books", bookId), {
-      borrowDuration: Number(newDuration)
-    });
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
 
 
 // ============================================================
@@ -223,6 +205,7 @@ let genreChartInstance = null; // Keep track so we can update it later
 export async function renderAnalyticsChart() {
   const transSnap = await getDocs(collection(db, "transactions"));
   const genreCounts = {};
+  
 
   // Aggregate the data
   transSnap.forEach(doc => {
@@ -277,3 +260,187 @@ export async function renderAnalyticsChart() {
 
 // Call this function when the admin page loads (e.g., inside your init() function)
 renderAnalyticsChart();
+
+// ==========================================
+// 🚨 OVERDUE METRICS & EMAIL PING SYSTEM
+// ==========================================
+
+export async function calculateMetrics() {
+  const transQuery = query(collection(db, "transactions"), where("returned", "==", false));
+  const transSnap = await getDocs(transQuery);
+
+  let overdue = 0;
+  let dueSoon = 0;
+  const today = new Date();
+
+  transSnap.forEach(docSnap => {
+    const data = docSnap.data();
+    if (!data.dueDate) return;
+
+    const dueDate = new Date(data.dueDate);
+    
+    // Calculate difference in days
+    const diffTime = dueDate - today;
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays < 0) {
+      overdue++; // It is past the due date
+    } else if (diffDays <= 3) {
+      dueSoon++; // It is due within the next 3 days
+    }
+  });
+
+  // Update the Admin Dashboard UI
+  const overdueElement = document.getElementById("overdue-count");
+  const dueSoonElement = document.getElementById("due-soon-count");
+  
+  if (overdueElement) overdueElement.innerText = overdue;
+  if (dueSoonElement) dueSoonElement.innerText = dueSoon;
+}
+
+// The Email Generator Function
+// The Two-State Email Generator Function
+window.pingBorrower = function(studentEmail, studentName, bookTitle, dueDate, isOverdue) {
+  let subject, body;
+
+  if (isOverdue) {
+    //THE OVERDUE WARNING
+    subject = encodeURIComponent("URGENT: Overdue Book - " + bookTitle);
+    body = encodeURIComponent(
+      `Hello ${studentName},\n\n` +
+      `This is an automated reminder from the Library System. ` +
+      `Our records show that your borrowed book, "${bookTitle}", was due on ${dueDate} and is now OVERDUE.\n\n` +
+      `Please return it to the library immediately via your Student Portal.\n\n` +
+      `Thank you,\nLibrary Administration`
+    );
+  } else {
+    //THE GENERAL NOTICE
+    subject = encodeURIComponent("Library Notice Regarding: " + bookTitle);
+    body = encodeURIComponent(
+      `Hello ${studentName},\n\n` +
+      `This is a message from the Library Administration regarding your currently borrowed book, "${bookTitle}" (Due: ${dueDate}).\n\n` +
+      `[ Admin: Type your message here ]\n\n` +
+      `Thank you,\nLibrary Administration`
+    );
+  }
+  
+  // The magic link that forces the Gmail web interface to open in compose mode
+  const gmailLink = `https://mail.google.com/mail/?view=cm&fs=1&to=${studentEmail}&su=${subject}&body=${body}`;
+  
+  // Opens in a new tab so they don't lose their place on the Admin Dashboard
+  window.open(gmailLink, '_blank');
+};
+
+// ==========================================
+// ✨ AI AUTO-SUMMARIZER (GEMINI API)
+// ==========================================
+
+window.generateSummary = async function() {
+  const title = document.getElementById("bookTitle").value.trim();
+  const author = document.getElementById("bookAuthor").value.trim();
+  const genre = document.getElementById("bookGenre").value;
+
+  if (!title || !author) {
+    alert("Please enter a Title and Author first so the AI knows what book to summarize!");
+    return;
+  }
+
+  const descriptionBox = document.getElementById("bookDescription");
+  descriptionBox.value = "✨ AI is thinking..."; // Loading state
+
+  // ⚠️ PASTE YOUR GOOGLE AI STUDIO KEY HERE:
+  const apiKey = "AIzaSyBbaW0BC6zmu7B04MA_whvAoZ5V7c8S05s"; 
+  
+  // The Prompt Engineering
+  const prompt = `You are a professional librarian. Write a compelling, 2-sentence catalog summary for the book "${title}" by ${author}. The genre is ${genre}. Do not use quotes around the summary. Make it engaging.`;
+
+  try {
+    // Calling the Gemini 1.5 Flash Model (Fast & Free)
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
+
+    const data = await response.json();
+    
+    // Extracting the text from the AI's JSON response
+    const summary = data.candidates[0].content.parts[0].text;
+    
+    // Typing it into the form!
+    descriptionBox.value = summary.trim();
+
+  } catch (error) {
+    console.error("AI Generation Error:", error);
+    descriptionBox.value = "";
+    alert("Failed to connect to the AI. Check your API key or internet connection.");
+  }
+};
+// ==========================================
+// 🚀 CSV DATA INGESTION PIPELINE
+// ==========================================
+
+window.importCSV = function() {
+  const fileInput = document.getElementById('csvUpload');
+  const statusText = document.getElementById('csvStatus');
+  
+  if (!fileInput.files.length) {
+    alert("Please select a CSV file first!");
+    return;
+  }
+
+  statusText.style.color = "#dde1ee";
+  statusText.innerText = "Parsing CSV and uploading to Firestore... please wait.";
+
+  // Use PapaParse to read the local file
+  Papa.parse(fileInput.files[0], {
+    header: true, // Tells the parser that the first row contains column names
+    skipEmptyLines: true,
+    complete: async function(results) {
+      const books = results.data;
+      let addedCount = 0;
+      console.log("CSV First Row Data:", books[0]);
+
+      for (const row of books) {
+        // MATCHING YOUR EXACT LOWERCASE CSV HEADERS
+        const title  = row.title;
+        const author = row.authors;
+        const genre  = row.categories || "Other"; 
+        const desc   = row.description || "";
+        const coverUrl = row.thumbnail || "";
+
+        // Only add if both title and author exist (skips blank rows at the bottom of the CSV)
+        if (title && author) {
+          try {
+            await window.handleAddBookSilent(title, author, genre, desc);
+            addedCount++;
+          } catch (e) {
+            console.error(`Failed to add: ${title}`, e);
+          }
+        }
+      }
+      
+      statusText.style.color = "#4E9F3D";
+      statusText.innerText = `Success! Ingested ${addedCount} books into the database.`;
+      
+      // Clear the file input
+      fileInput.value = "";
+    }
+  });
+};
+
+// A silent version of your add book function so it doesn't trigger UI popups 100 times
+window.handleAddBookSilent = async function(title, author, genre, description) {
+  // Uses your exported 'addBook' function from the top of admin.js
+  await addBook({
+    title: title,
+    author: author,
+    genre: genre,
+    description: description,
+    coverUrl: coverUrl
+  });
+};
+
+
